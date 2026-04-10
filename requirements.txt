@@ -1,0 +1,13 @@
+lightgbm
+shap
+pandas
+numpy
+sqlalchemy
+psycopg2-binary
+fastapi
+uvicorn
+scikit-learn
+matplotlib
+seaborn
+elasticsearch
+jupyter

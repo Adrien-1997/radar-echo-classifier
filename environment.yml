@@ -1,0 +1,23 @@
+name: radar-pipeline
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - ipykernel
+  - pip:
+    - lightgbm
+    - shap
+    - pandas
+    - numpy
+    - sqlalchemy
+    - psycopg2-binary
+    - fastapi
+    - uvicorn
+    - scikit-learn
+    - matplotlib
+    - seaborn
+    - elasticsearch
+    - jupyter
+    - joblib
