@@ -79,6 +79,23 @@ radar-echo-classifier/
 
 ---
 
+## Status
+
+| Component | Status |
+|-----------|--------|
+| docker-compose | done — `version` field removed (obsolete) |
+| PostgreSQL | running and healthy on `localhost:5432` |
+| FastAPI scorer | built, not yet started |
+| Grafana | not yet started |
+| n8n | not yet started |
+| Elasticsearch + Kibana | not yet started |
+| Jupyter | not yet started |
+| DB schema | not yet applied |
+| Synthetic data | not yet loaded |
+| Model training | not yet done |
+
+---
+
 ## Quick Start
 
 ### 1. Clone
@@ -90,8 +107,19 @@ cd radar-echo-classifier
 
 ### 2. Start the stack
 
+Start all services:
 ```bash
 docker compose up -d
+```
+
+Or start a single service (e.g. PostgreSQL only):
+```bash
+docker compose up -d postgres
+```
+
+Stop everything (data is preserved in Docker volumes):
+```bash
+docker compose down
 ```
 
 ### 3. Bootstrap the database and load synthetic data
@@ -123,6 +151,22 @@ curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
   -d '{"zh_dbz": 35, "zdr_db": 1.2, "kdp_deg_km": 0.4, "rhohv": 0.97, "phidp_deg": 45, "azimuth": 120, "elevation": 2.5, "range_km": 80}'
 ```
+
+### 6. Connect to PostgreSQL directly
+
+From WSL terminal (requires `psql`):
+```bash
+psql -h localhost -U radar -d radar_db
+# password: radar
+```
+
+Via Docker (no client needed):
+```bash
+docker exec -it radar-echo-classifier-postgres-1 psql -U radar -d radar_db
+```
+
+From a GUI client (DBeaver, TablePlus, DataGrip):
+- Host: `localhost`, Port: `5432`, DB: `radar_db`, User: `radar`, Password: `radar`
 
 ---
 

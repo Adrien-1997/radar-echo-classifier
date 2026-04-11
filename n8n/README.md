@@ -1,6 +1,11 @@
 # n8n Workflow — Automated Scoring and Alerting
 
-Access n8n at **http://localhost:5678** (credentials: `admin` / `admin`).
+> **Status:** not yet deployed. n8n container not yet started.
+
+Access n8n at **http://localhost:5678** (credentials: `admin` / `admin`) once started:
+```bash
+docker compose up -d n8n
+```
 
 ## Workflow to build
 

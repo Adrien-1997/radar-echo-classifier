@@ -1,6 +1,11 @@
 # Grafana Dashboards
 
-Access Grafana at **http://localhost:3000** (default credentials: `admin` / `admin`).
+> **Status:** not yet deployed. Grafana container not yet started.
+
+Access Grafana at **http://localhost:3000** (default credentials: `admin` / `admin`) once started:
+```bash
+docker compose up -d grafana
+```
 
 Connect Grafana to PostgreSQL as a data source:
 - Host: `postgres:5432`
