@@ -11,3 +11,5 @@ matplotlib
 seaborn
 elasticsearch
 jupyter
+arm-pyart
+boto3

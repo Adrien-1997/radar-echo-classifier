@@ -56,15 +56,6 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
 
-  jupyter:
-    image: jupyter/scipy-notebook
-    ports:
-      - "8888:8888"
-    environment:
-      - JUPYTER_ENABLE_LAB=yes
-    volumes:
-      - ./notebooks:/home/jovyan/work
-
   scorer:
     build: ./scorer
     ports:

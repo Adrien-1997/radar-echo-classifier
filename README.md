@@ -12,6 +12,77 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 
 ---
 
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                          DATA SOURCES                                │
+│                                                                      │
+│   NEXRAD files (S3 / local)           Synthetic generator            │
+│   pyart / wradlib parser              generate_data.py               │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │  raw polarimetric echoes
+                           ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                        PostgreSQL :5432                              │
+│                                                                      │
+│   radar_echoes       radar_features       radar_predictions          │
+│   (raw features      (engineered          (clutter_proba,            │
+│    + label)           ratios, flags)       prediction, run_id)       │
+└────────────┬──────────────────────────────────────────┬──────────────┘
+             │                                          │
+             │  query features                          │  write predictions
+             ▼                                          │
+┌────────────────────────┐                              │
+│      n8n :5678         │                              │
+│                        │                              │
+│  cron trigger          │                              │
+│  → query PG            │                              │
+│  → POST /predict  ─────┼──────────────────────────────┤
+│  → alert if            │                              │
+│    clutter_rate > 40%  │                              │
+└────────────────────────┘                              │
+             │                                          │
+             │  POST /predict                           │
+             ▼                                          │
+┌────────────────────────┐                              │
+│   FastAPI scorer :8000 │                              │
+│                        │                              │
+│  /health               │  clutter_proba               │
+│  /predict  ────────────┼──────────────────────────────┘
+│                        │
+│  loads model.pkl       │
+│  (LightGBM)            │
+└────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  OBSERVABILITY                                                       │
+│                                                                      │
+│  Grafana :3000                                                       │
+│  └─ reads PostgreSQL directly                                        │
+│     clutter rate, rolling AUC, heatmap, latency, alert rule          │
+│                                                                      │
+│  Elasticsearch :9200                                                 │
+│  └─ receives pipeline run logs                                       │
+│                                                                      │
+│  Kibana :5601                                                        │
+│  └─ UI over Elasticsearch (dev only)                                 │
+└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  DEV TOOLING                                                         │
+│                                                                      │
+│  Jupyter Lab :8888                                                   │
+│  └─ 01_eda.ipynb                                                     │
+│  └─ 02_shap.ipynb                                                    │
+│  └─ outputs model.pkl                                                │
+│                                                                      │
+│  Dataiku :10000 (external)                                           │
+│  └─ visual ML lab, pipeline recipes                                  │
+│  └─ exports model.pkl to scorer/                                     │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Stack
 
 | Component | Role |
@@ -19,9 +90,9 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 | **PostgreSQL 15** | Store raw radar echoes, engineered features, and model predictions |
 | **Elasticsearch 8** | Index predictions and logs for full-text search and analytics |
 | **Kibana 8** | Explore and visualize Elasticsearch indices |
-| **Grafana** | Real-time dashboards: clutter rate, rolling AUC, latency |
-| **n8n** | Workflow automation: cron scoring, alerting when clutter rate > 40% |
-| **Jupyter (scipy-notebook)** | EDA, feature engineering, model training, SHAP explainability |
+| **Grafana** | Real-time dashboards: clutter rate, rolling AUC, latency — see [grafana/dashboards/README.md](grafana/dashboards/README.md) |
+| **n8n** | Workflow automation: cron scoring, alerting when clutter rate > 40% — see [n8n/README.md](n8n/README.md) |
+| **Jupyter Lab** | EDA, feature engineering, model training, SHAP explainability — runs directly from venv, not Docker |
 | **FastAPI scorer** | REST API to serve model predictions (`/predict`) |
 | **Dataiku** | Orchestrate the full pipeline visually (external, port 10000) |
 
@@ -36,7 +107,7 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 | 5601 | Kibana |
 | 5678 | n8n |
 | 8000 | FastAPI scorer |
-| 8888 | Jupyter Lab |
+| 8888 | Jupyter Lab (venv, not Docker) |
 | 9200 | Elasticsearch |
 | 10000 | Dataiku (external, not in Docker Compose) |
 
@@ -81,18 +152,24 @@ radar-echo-classifier/
 
 ## Status
 
-| Component | Status |
-|-----------|--------|
-| docker-compose | done — `version` field removed (obsolete) |
-| PostgreSQL | running and healthy on `localhost:5432` |
-| FastAPI scorer | built, not yet started |
-| Grafana | not yet started |
-| n8n | not yet started |
-| Elasticsearch + Kibana | not yet started |
-| Jupyter | not yet started |
-| DB schema | not yet applied |
-| Synthetic data | not yet loaded |
-| Model training | not yet done |
+- [x] Repo scaffolded
+- [x] Python venv (WSL)
+- [x] Docker Desktop + WSL integration (data moved to D drive)
+- [x] docker-compose finalized — Jupyter removed (runs from venv directly)
+- [x] PostgreSQL running and healthy (`localhost:5432`)
+- [x] Full docker-compose stack up (Postgres, Grafana, n8n, Elasticsearch, Kibana, scorer)
+- [x] DB schema applied (`sql/init_schema.sql`)
+- [x] NEXRAD ingestion script (`ingest_nexrad.py`) — downloads from Unidata THREDDS, parses with Py-ART, bulk-inserts via COPY
+- [x] First real radar scan ingested — 563k gates, KBRO 2026-04-11
+- [ ] More scans ingested (temporal variety for training)
+- [ ] Dataiku Free Edition installed and connected to PostgreSQL
+- [ ] FastAPI scorer deployed
+- [ ] n8n workflow (cron → PostgreSQL → scorer → alert)
+- [ ] Grafana dashboards
+- [ ] Elasticsearch + Kibana
+- [ ] NEXRAD replay mode (simulate live feed from local file)
+- [ ] Model trained (LightGBM, Dataiku)
+- [ ] Offline packaging
 
 ---
 
