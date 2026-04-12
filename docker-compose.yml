@@ -60,6 +60,10 @@ services:
     build: ./scorer
     ports:
       - "8000:8000"
+    environment:
+      - DSS_MODEL_DIR=/dss_model
+    volumes:
+      - /home/adrie/dss/saved_models/RADARECHOCLASSIFIER/Fw8y79E8/versions/initial:/dss_model:ro
     depends_on:
       postgres:
         condition: service_healthy

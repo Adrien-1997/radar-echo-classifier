@@ -160,15 +160,14 @@ radar-echo-classifier/
 - [x] Full docker-compose stack up (Postgres, Grafana, n8n, Elasticsearch, Kibana, scorer)
 - [x] DB schema applied (`sql/init_schema.sql`)
 - [x] NEXRAD ingestion script (`ingest_nexrad.py`) — downloads from Unidata THREDDS, parses with Py-ART, bulk-inserts via COPY
-- [x] First real radar scan ingested — 563k gates, KBRO 2026-04-11
-- [ ] More scans ingested (temporal variety for training)
-- [ ] Dataiku Free Edition installed and connected to PostgreSQL
-- [ ] FastAPI scorer deployed
+- [x] Batch ingestion (`batch_ingest.py`) — 10 scans, 4 sites (KBRO/KTLX/KAMX/KPBZ), 8.93M gates, 27.8% clutter
+- [x] Dataiku DSS 13.3.2 installed and connected to PostgreSQL (port 11000)
+- [x] Random Forest trained in Dataiku AutoML — 7 polarimetric features, AUC 1.0
+- [x] FastAPI scorer wired to Dataiku saved model via Docker volume mount
 - [ ] n8n workflow (cron → PostgreSQL → scorer → alert)
 - [ ] Grafana dashboards
 - [ ] Elasticsearch + Kibana
 - [ ] NEXRAD replay mode (simulate live feed from local file)
-- [ ] Model trained (LightGBM, Dataiku)
 - [ ] Offline packaging
 
 ---
@@ -226,7 +225,7 @@ This will:
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"zh_dbz": 35, "zdr_db": 1.2, "kdp_deg_km": 0.4, "rhohv": 0.97, "phidp_deg": 45, "azimuth": 120, "elevation": 2.5, "range_km": 80}'
+  -d '{"zh_dbz": 35, "zdr_db": 1.2, "rhohv": 0.97, "phidp_deg": 45, "azimuth": 120, "elevation": 2.5, "range_km": 80}'
 ```
 
 ### 6. Connect to PostgreSQL directly
