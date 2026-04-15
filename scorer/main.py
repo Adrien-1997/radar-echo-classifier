@@ -1,58 +1,45 @@
 """
 FastAPI scorer — serves rain/clutter predictions.
 
-Loads model and rescalers from the Dataiku saved model directory,
-configured via DSS_MODEL_DIR environment variable.
+Loads a single sklearn Pipeline (imputer + scaler + classifier) from clf.pkl.
+The pipeline is produced by notebooks/02_shap.ipynb and dropped in model/.
 """
 
-import json
 import logging
 import os
-import random
 from pathlib import Path
+from typing import Optional
 
 import joblib
 import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-# Feature order must match Dataiku training order
-FEATURES = ["elevation", "zdr_db", "rhohv", "phidp_deg", "range_km", "azimuth", "zh_dbz"]
+# Feature order must match 02_shap.ipynb training order
+FEATURES = ["zh_dbz", "zdr_db", "kdp_deg_km", "rhohv", "phidp_deg", "azimuth", "elevation", "range_km"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Radar Echo Scorer", version="0.2.0")
+app = FastAPI(title="Radar Echo Scorer", version="0.3.0")
 
-# Load model and rescalers from DSS saved model directory
-DSS_MODEL_DIR = Path(os.getenv(
-    "DSS_MODEL_DIR",
-    "/dss_model",  # default mount point in container
-))
+MODEL_DIR = Path(os.getenv("MODEL_DIR", "/dss_model"))
+clf_path = MODEL_DIR / "clf.pkl"
 
 model = None
-shifts = None
-inv_scales = None
-
-clf_path = DSS_MODEL_DIR / "clf.pkl"
-rescalers_path = DSS_MODEL_DIR / "rescalers.json"
-
-if clf_path.exists() and rescalers_path.exists():
+if clf_path.exists():
     model = joblib.load(clf_path)
-    with open(rescalers_path) as f:
-        r = json.load(f)
-    shifts = np.array(r["shifts"])
-    inv_scales = np.array(r["inv_scales"])
-    logger.info("Model loaded from %s", DSS_MODEL_DIR)
+    logger.info("Model loaded from %s", clf_path)
 else:
-    logger.warning("Model not found at %s — /predict will return random scores.", DSS_MODEL_DIR)
+    logger.warning("Model not found at %s — /predict will return random scores.", clf_path)
 
 
 class EchoInput(BaseModel):
-    zh_dbz: float
-    zdr_db: float
-    rhohv: float
-    phidp_deg: float
+    zh_dbz: Optional[float] = None
+    zdr_db: Optional[float] = None
+    kdp_deg_km: Optional[float] = None
+    rhohv: Optional[float] = None
+    phidp_deg: Optional[float] = None
     azimuth: float
     elevation: float
     range_km: float
@@ -71,19 +58,20 @@ def health():
 @app.post("/predict", response_model=PredictionOutput)
 def predict(echo: EchoInput):
     if model is None:
+        import random
         clutter_proba = round(random.uniform(0, 1), 4)
     else:
         raw = np.array([[
-            echo.elevation,
+            echo.zh_dbz,
             echo.zdr_db,
+            echo.kdp_deg_km,
             echo.rhohv,
             echo.phidp_deg,
-            echo.range_km,
             echo.azimuth,
-            echo.zh_dbz,
-        ]])
-        scaled = (raw - shifts) * inv_scales
-        clutter_proba = float(model.predict_proba(scaled)[0, 1])
+            echo.elevation,
+            echo.range_km,
+        ]], dtype=float)  # NaN for None fields — pipeline imputer handles these
+        clutter_proba = float(model.predict_proba(raw)[0, 1])
 
     prediction = int(clutter_proba >= 0.5)
     return PredictionOutput(clutter_proba=round(clutter_proba, 4), prediction=prediction)

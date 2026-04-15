@@ -72,12 +72,11 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 │                                                                      │
 │  Jupyter Lab :8888                                                   │
 │  └─ 01_eda.ipynb                                                     │
-│  └─ 02_shap.ipynb                                                    │
-│  └─ outputs model.pkl                                                │
+│  └─ 02_train.ipynb  (training + SHAP + exports model/clf.pkl)        │
 │                                                                      │
-│  Dataiku :10000 (external)                                           │
-│  └─ visual ML lab, pipeline recipes                                  │
-│  └─ exports model.pkl to scorer/                                     │
+│  Dataiku :11000 (external, training only)                            │
+│  └─ visual ML lab, AutoML, feature engineering                       │
+│  └─ DSS is training-only — notebook is canonical model producer      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,9 +91,9 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 | **Kibana 8** | Explore and visualize Elasticsearch indices |
 | **Grafana** | Real-time dashboards: clutter rate, rolling AUC, latency — see [grafana/dashboards/README.md](grafana/dashboards/README.md) |
 | **n8n** | Workflow automation: cron scoring, alerting when clutter rate > 40% — see [n8n/README.md](n8n/README.md) |
-| **Jupyter Lab** | EDA, feature engineering, model training, SHAP explainability — runs directly from venv, not Docker |
-| **FastAPI scorer** | REST API to serve model predictions (`/predict`) |
-| **Dataiku** | Orchestrate the full pipeline visually (external, port 10000) |
+| **Jupyter Lab** | EDA, model training (`02_train.ipynb`), SHAP explainability — runs directly from venv, not Docker |
+| **FastAPI scorer** | REST API to serve model predictions (`/predict`) — loads `model/clf.pkl` (sklearn Pipeline) |
+| **Dataiku** | Visual ML lab, AutoML, training only (external, port 11000) — not in Docker Compose |
 
 ---
 
@@ -109,7 +108,7 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 | 8000 | FastAPI scorer |
 | 8888 | Jupyter Lab (venv, not Docker) |
 | 9200 | Elasticsearch |
-| 10000 | Dataiku (external, not in Docker Compose) |
+| 11000 | Dataiku (external, not in Docker Compose) |
 
 ---
 
@@ -117,7 +116,9 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 
 ```
 radar-echo-classifier/
-├── notebooks/           # Jupyter notebooks (EDA, SHAP, training)
+├── notebooks/           # Jupyter notebooks (EDA, training, SHAP)
+├── model/               # Drop clf.pkl here to update the scorer (gitignored)
+├── figures/             # SHAP plots output by 02_train.ipynb
 ├── sql/                 # Schema DDL and query helpers
 ├── scorer/              # FastAPI microservice (Dockerfile + app)
 ├── n8n/                 # n8n workflow documentation
@@ -163,11 +164,15 @@ radar-echo-classifier/
 - [x] Batch ingestion (`batch_ingest.py`) — 10 scans, 4 sites (KBRO/KTLX/KAMX/KPBZ), 8.93M gates, 27.8% clutter
 - [x] Dataiku DSS 13.3.2 installed and connected to PostgreSQL (port 11000)
 - [x] Random Forest trained in Dataiku AutoML — 7 polarimetric features, AUC 1.0
-- [x] FastAPI scorer wired to Dataiku saved model via Docker volume mount
+- [x] FastAPI scorer loads single `model/clf.pkl` (sklearn Pipeline — no sidecar files)
+- [x] `02_train.ipynb` written — Pipeline(SimpleImputer → StandardScaler → LightGBM), SHAP, exports `model/clf.pkl`
+- [ ] Run `01_eda.ipynb`
+- [x] `02_train.ipynb` run — LightGBM Pipeline trained, SHAP plots generated, `model/clf.pkl` exported
 - [ ] n8n workflow (cron → PostgreSQL → scorer → alert)
 - [ ] Grafana dashboards
 - [ ] Elasticsearch + Kibana
 - [ ] NEXRAD replay mode (simulate live feed from local file)
+- [ ] HCA label ingestion — replace heuristic labels with NEXRAD Level-III HCA ground truth
 - [ ] Offline packaging
 
 ---
