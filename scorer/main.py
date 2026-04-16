@@ -7,12 +7,15 @@ The pipeline is produced by notebooks/02_shap.ipynb and dropped in model/.
 
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Optional
 
 import joblib
 import numpy as np
-from fastapi import FastAPI
+import psycopg2
+import psycopg2.extras
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 # Feature order must match 02_shap.ipynb training order
@@ -24,6 +27,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Radar Echo Scorer", version="0.3.0")
 
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/dss_model"))
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://radar:radar@postgres:5432/radar_db")
 clf_path = MODEL_DIR / "clf.pkl"
 
 model = None
@@ -53,6 +57,91 @@ class PredictionOutput(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "model_loaded": model is not None}
+
+
+class ScoreLatestParams(BaseModel):
+    limit: int = 10000
+
+
+class ScoreLatestResult(BaseModel):
+    run_id: str
+    n_scored: int
+    n_clutter: int
+    clutter_rate: float
+
+
+@app.post("/score_latest", response_model=ScoreLatestResult)
+def score_latest(params: ScoreLatestParams = ScoreLatestParams()):
+    """
+    Pull the most recent `limit` gates from radar_echoes, score them,
+    write results to radar_predictions, and return clutter stats.
+    """
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    run_id = str(uuid.uuid4())
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"DB connection failed: {e}")
+
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, zh_dbz, zdr_db, kdp_deg_km, rhohv, phidp_deg,
+                       azimuth, elevation, range_km
+                FROM radar_echoes
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (params.limit,),
+            )
+            rows = cur.fetchall()
+
+        if not rows:
+            conn.close()
+            return ScoreLatestResult(run_id=run_id, n_scored=0, n_clutter=0, clutter_rate=0.0)
+
+        X = np.array(
+            [[r["zh_dbz"], r["zdr_db"], r["kdp_deg_km"], r["rhohv"],
+              r["phidp_deg"], r["azimuth"], r["elevation"], r["range_km"]]
+             for r in rows],
+            dtype=float,
+        )
+        probas = model.predict_proba(X)[:, 1]
+        preds = (probas >= 0.5).astype(int)
+
+        records = [
+            (rows[i]["id"], float(probas[i]), int(preds[i]), run_id)
+            for i in range(len(rows))
+        ]
+
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                INSERT INTO radar_predictions (echo_id, clutter_proba, prediction, run_id)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+                """,
+                records,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    n_clutter = int(preds.sum())
+    clutter_rate = round(n_clutter / len(rows), 4)
+    logger.info("run=%s scored=%d clutter_rate=%.3f", run_id, len(rows), clutter_rate)
+
+    return ScoreLatestResult(
+        run_id=run_id,
+        n_scored=len(rows),
+        n_clutter=n_clutter,
+        clutter_rate=clutter_rate,
+    )
 
 
 @app.post("/predict", response_model=PredictionOutput)

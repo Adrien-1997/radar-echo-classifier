@@ -1,0 +1,179 @@
+{
+  "name": "Radar Clutter Scoring",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://scorer:8000/score_latest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"limit\": 10000\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0000-0000-000000000002",
+      "name": "Score Latest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.clutter_rate }}",
+              "rightValue": 0.4,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-0000-0000-000000000003",
+      "name": "Clutter > 40%?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "alert-1",
+              "name": "status",
+              "value": "ALERT",
+              "type": "string"
+            },
+            {
+              "id": "alert-2",
+              "name": "message",
+              "value": "=High clutter rate: {{ ($json.clutter_rate * 100).toFixed(1) }}% ({{ $json.n_clutter }}/{{ $json.n_scored }} gates) — run {{ $json.run_id }}",
+              "type": "string"
+            },
+            {
+              "id": "alert-3",
+              "name": "run_id",
+              "value": "={{ $json.run_id }}",
+              "type": "string"
+            },
+            {
+              "id": "alert-4",
+              "name": "clutter_rate",
+              "value": "={{ $json.clutter_rate }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-0000-0000-000000000004",
+      "name": "Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok-1",
+              "name": "status",
+              "value": "OK",
+              "type": "string"
+            },
+            {
+              "id": "ok-2",
+              "name": "message",
+              "value": "=Normal clutter rate: {{ ($json.clutter_rate * 100).toFixed(1) }}% ({{ $json.n_clutter }}/{{ $json.n_scored }} gates) — run {{ $json.run_id }}",
+              "type": "string"
+            },
+            {
+              "id": "ok-3",
+              "name": "run_id",
+              "value": "={{ $json.run_id }}",
+              "type": "string"
+            },
+            {
+              "id": "ok-4",
+              "name": "clutter_rate",
+              "value": "={{ $json.clutter_rate }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-0000-0000-000000000005",
+      "name": "OK",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Score Latest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Latest": {
+      "main": [
+        [
+          {
+            "node": "Clutter > 40%?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clutter > 40%?": {
+      "main": [
+        [
+          {
+            "node": "Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

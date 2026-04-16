@@ -62,6 +62,8 @@ services:
       - "8000:8000"
     volumes:
       - ./model:/dss_model:ro
+    environment:
+      - DATABASE_URL=postgresql://radar:radar@postgres:5432/radar_db
     depends_on:
       postgres:
         condition: service_healthy
