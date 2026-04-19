@@ -6,3 +6,5 @@ pandas
 numpy
 joblib
 psycopg2-binary
+requests
+arm-pyart

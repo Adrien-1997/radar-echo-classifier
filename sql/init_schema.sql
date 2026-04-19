@@ -40,7 +40,19 @@ CREATE TABLE IF NOT EXISTS radar_predictions (
     predicted_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS radar_scoring_runs (
+    id           SERIAL PRIMARY KEY,
+    run_id       UUID        NOT NULL,
+    site         TEXT        NOT NULL,
+    scan_date    DATE        NOT NULL,
+    n_scored     INT         NOT NULL,
+    n_clutter    INT         NOT NULL,
+    clutter_rate FLOAT       NOT NULL,
+    scored_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_echoes_timestamp   ON radar_echoes(timestamp);
 CREATE INDEX IF NOT EXISTS idx_features_timestamp ON radar_features(timestamp);
 CREATE INDEX IF NOT EXISTS idx_preds_echo_id      ON radar_predictions(echo_id);
 CREATE INDEX IF NOT EXISTS idx_preds_run_id       ON radar_predictions(run_id);
+CREATE INDEX IF NOT EXISTS idx_runs_scored_at     ON radar_scoring_runs(scored_at);

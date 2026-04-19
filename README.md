@@ -1,14 +1,12 @@
 # radar-echo-classifier
 
-End-to-end ML pipeline for meteorological radar echo classification (rain vs clutter). Stack: Python, PostgreSQL, Dataiku, Grafana, Kibana, Elasticsearch, n8n, FastAPI, Jupyter.
-
-This is a data science side project that explores how to build a production-grade classification pipeline on polarimetric weather radar data, from raw echo ingestion to automated alerting.
+End-to-end ML pipeline for meteorological radar echo classification (rain vs clutter). Stack: Python, PostgreSQL, Grafana, n8n, FastAPI, Jupyter.
 
 ---
 
 ## Overview
 
-Weather radars return echoes from both precipitation and non-meteorological sources (ground clutter, insects, aircraft, etc.). This project builds a full ML pipeline to classify each radar gate as **rain** or **clutter** using dual-polarization variables, and wraps it in a modern data platform stack.
+Weather radars return echoes from both precipitation and non-meteorological sources (ground clutter, insects, anomalous propagation, etc.). This project builds a full ML pipeline to classify each radar **gate** as **rain** or **clutter** using dual-polarization variables, and wraps it in a production stack: live ingestion, automated scoring, alerting, and dashboarding.
 
 ---
 
@@ -16,67 +14,59 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                          DATA SOURCES                                │
+│                          DATA SOURCE                                 │
 │                                                                      │
-│   NEXRAD files (S3 / local)           Synthetic generator            │
-│   pyart / wradlib parser              generate_data.py               │
+│   NEXRAD Level-III (Unidata THREDDS)                                 │
+│   Products: N0B / N0X / N0C / N0K / N0H (HCA)                       │
+│   Training sites: KBRO, KTLX, KAMX, KPBZ                            │
 └──────────────────────────┬───────────────────────────────────────────┘
-                           │  raw polarimetric echoes
+                           │  pyart — parse NIDS binaries
                            ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        PostgreSQL :5432                              │
 │                                                                      │
-│   radar_echoes       radar_features       radar_predictions          │
-│   (raw features      (engineered          (clutter_proba,            │
-│    + label)           ratios, flags)       prediction, run_id)       │
-└────────────┬──────────────────────────────────────────┬──────────────┘
-             │                                          │
-             │  query features                          │  write predictions
-             ▼                                          │
-┌────────────────────────┐                              │
-│      n8n :5678         │                              │
-│                        │                              │
-│  cron trigger          │                              │
-│  → query PG            │                              │
-│  → POST /predict  ─────┼──────────────────────────────┤
-│  → alert if            │                              │
-│    clutter_rate > 40%  │                              │
-└────────────────────────┘                              │
-             │                                          │
-             │  POST /predict                           │
-             ▼                                          │
-┌────────────────────────┐                              │
-│   FastAPI scorer :8000 │                              │
-│                        │                              │
-│  /health               │  clutter_proba               │
-│  /predict  ────────────┼──────────────────────────────┘
-│                        │
-│  loads model.pkl       │
-│  (LightGBM)            │
-└────────────────────────┘
+│   radar_echoes          radar_predictions      radar_scoring_runs    │
+│   (raw gates            (proba + prediction     (run summary:        │
+│    + HCA labels)         per gate)               site, clutter_rate) │
+└────────────┬─────────────────────────────────────────────────────────┘
+             │
+             ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  OBSERVABILITY                                                       │
+│                     FastAPI scorer :8000                             │
 │                                                                      │
-│  Grafana :3000                                                       │
-│  └─ reads PostgreSQL directly                                        │
-│     clutter rate, rolling AUC, heatmap, latency, alert rule          │
+│  /health         — service status                                    │
+│  /predict        — score a single gate (JSON body)                   │
+│  /score_latest   — score latest N gates from radar_echoes            │
+│  /score_nexrad   — live THREDDS fetch + in-memory scoring            │
+│  /log_run        — write a run summary to radar_scoring_runs         │
 │                                                                      │
-│  Elasticsearch :9200                                                 │
-│  └─ receives pipeline run logs                                       │
-│                                                                      │
-│  Kibana :5601                                                        │
-│  └─ UI over Elasticsearch (dev only)                                 │
-└──────────────────────────────────────────────────────────────────────┘
+│  Pipeline loaded from model/clf.pkl:                                 │
+│  PolarimetricEngineer → SimpleImputer → LightGBM                     │
+└────────────┬─────────────────────────────────────────────────────────┘
+             │
+             ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  DEV TOOLING                                                         │
+│                          n8n :5678                                   │
 │                                                                      │
-│  Jupyter Lab :8888                                                   │
-│  └─ 01_eda.ipynb                                                     │
-│  └─ 02_train.ipynb  (training + SHAP + exports model/clf.pkl)        │
+│  Manual Trigger                                                      │
+│  → Parameters (site, scan_index)                                     │
+│  → POST /score_nexrad  ──┬──→ POST /log_run  (→ radar_scoring_runs)  │
+│                          └──→ Clutter detected?                      │
+│                                yes → Alert → Grafana Annotation      │
+│                                no  → OK                              │
+└────────────┬─────────────────────────────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                        Grafana :3000                                 │
 │                                                                      │
-│  Dataiku :11000 (external, training only)                            │
-│  └─ visual ML lab, AutoML, feature engineering                       │
-│  └─ DSS is training-only — notebook is canonical model producer      │
+│  Dashboard "Radar Clutter Monitor"                                   │
+│  ├─ Clutter rate over time (time series, red threshold at 40%)       │
+│  ├─ Last clutter rate / last site / runs 24h / alerts today (stats)  │
+│  ├─ Recent runs (table)                                              │
+│  └─ Red annotation markers on alert scans                            │
+│                                                                      │
+│  Auto-provisioned from grafana/provisioning/                         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -86,14 +76,11 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 
 | Component | Role |
 |-----------|------|
-| **PostgreSQL 15** | Store raw radar echoes, engineered features, and model predictions |
-| **Elasticsearch 8** | Index predictions and logs for full-text search and analytics |
-| **Kibana 8** | Explore and visualize Elasticsearch indices |
-| **Grafana** | Real-time dashboards: clutter rate, rolling AUC, latency — see [grafana/dashboards/README.md](grafana/dashboards/README.md) |
-| **n8n** | Workflow automation: cron scoring, alerting when clutter rate > 40% — see [n8n/README.md](n8n/README.md) |
-| **Jupyter Lab** | EDA, model training (`02_train.ipynb`), SHAP explainability — runs directly from venv, not Docker |
-| **FastAPI scorer** | REST API to serve model predictions (`/predict`) — loads `model/clf.pkl` (sklearn Pipeline with `PolarimetricEngineer` feature transforms) |
-| **Dataiku** | Visual ML lab, AutoML, training only (external, port 11000) — not in Docker Compose |
+| **PostgreSQL 15** | Raw gate storage, predictions, run summaries |
+| **FastAPI scorer** | REST scoring API — loads `model/clf.pkl` |
+| **n8n** | Orchestration: live NEXRAD fetch → score → log → Grafana alert |
+| **Grafana** | Real-time dashboard — fed by `radar_scoring_runs` |
+| **Jupyter Lab** | EDA (`01_eda.ipynb`) and training (`02_train.ipynb`) — outside Docker |
 
 ---
 
@@ -101,14 +88,10 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 
 | Port | Service |
 |------|---------|
-| 3000 | Grafana |
+| 3000 | Grafana (admin / admin) |
 | 5432 | PostgreSQL |
-| 5601 | Kibana |
-| 5678 | n8n |
-| 8000 | FastAPI scorer |
-| 8888 | Jupyter Lab (venv, not Docker) |
-| 9200 | Elasticsearch |
-| 11000 | Dataiku (external, not in Docker Compose) |
+| 5678 | n8n (admin / admin) |
+| 8000 | FastAPI scorer (`/docs` for Swagger UI) |
 
 ---
 
@@ -116,76 +99,70 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 
 ```
 radar-echo-classifier/
-├── notebooks/           # Jupyter notebooks (EDA, training, SHAP)
-├── scorer/feature_engineering.py  # PolarimetricEngineer — shared by notebook + scorer
-├── model/               # Drop clf.pkl here to update the scorer (gitignored)
-├── figures/             # SHAP plots output by 02_train.ipynb
-├── sql/                 # Schema DDL and query helpers
-├── scorer/              # FastAPI microservice (Dockerfile + app)
-├── n8n/                 # n8n workflow documentation
-├── grafana/dashboards/  # Grafana dashboard specs and docs
-├── docs/                # Additional documentation
-├── data/                # Local data files (gitignored)
-├── generate_data.py     # Synthetic polarimetric data generator
-├── setup.sh             # Bootstrap script (DB init + data load)
-├── docker-compose.yml   # Full stack definition
-├── requirements.txt     # Python dependencies
-└── environment.yml      # Conda environment
+├── notebooks/
+│   ├── 01_eda.ipynb              # EDA — distributions, null analysis, spatial patterns
+│   └── 02_train.ipynb            # LightGBM training, SHAP, exports model/clf.pkl
+├── scorer/
+│   ├── main.py                   # FastAPI app — /predict /score_nexrad /log_run
+│   ├── feature_engineering.py    # PolarimetricEngineer (shared notebook ↔ scorer)
+│   ├── nexrad_ingest.py          # NEXRAD Level-III fetch + parse (no DB)
+│   ├── requirements.txt
+│   └── Dockerfile
+├── n8n/
+│   ├── workflow_score_latest.json  # n8n workflow — import via UI
+│   └── README.md
+├── grafana/
+│   ├── dashboards/
+│   │   └── clutter_monitor.json    # Auto-provisioned dashboard
+│   └── provisioning/
+│       ├── datasources/postgres.yaml
+│       └── dashboards/provider.yaml
+├── sql/
+│   └── init_schema.sql           # Full schema (radar_echoes, radar_predictions, radar_scoring_runs)
+├── model/                        # Drop clf.pkl here (gitignored)
+├── figures/                      # SHAP plots from 02_train.ipynb
+├── data/                         # Local NIDS files (gitignored)
+├── ingest_nexrad_l3.py           # Level-III ingestion → PostgreSQL (training data)
+├── batch_ingest.py               # Multi-site/date batch ingestion (12 scans, 4 sites)
+├── generate_data.py              # Synthetic data generator (dev only)
+├── docker-compose.yml
+├── requirements.txt
+└── environment.yml
 ```
 
 ---
 
 ## Polarimetric Features
 
-| Variable | Description |
-|----------|-------------|
-| `zh_dbz` | Horizontal reflectivity (dBZ) |
-| `zdr_db` | Differential reflectivity (dB) |
-| `kdp_deg_km` | Specific differential phase (°/km) |
-| `rhohv` | Cross-correlation coefficient |
-| `phidp_deg` | Differential phase (°) |
-| `azimuth` | Beam azimuth (°) |
-| `elevation` | Beam elevation (°) |
-| `range_km` | Range from radar (km) |
+| Variable | Description | Used by model |
+|----------|-------------|---------------|
+| `zh_dbz` | Horizontal reflectivity (dBZ) | Yes |
+| `zdr_db` | Differential reflectivity (dB) | Yes |
+| `rhohv` | Cross-correlation coefficient | Yes |
+| `azimuth` | Beam azimuth (°) → encoded as sin/cos | Yes |
+| `range_km` | Range from radar (km) → log1p | Yes |
+| `kdp_deg_km` | Specific differential phase (°/km) | No (ingested, not used) |
+| `phidp_deg` | Differential phase (°) | No (NULL in Level-III) |
+| `elevation` | Beam elevation (°) | No |
 
-**Label source:** NEXRAD Level-III HCA (Hydrometeor Classification Algorithm) — ground-truth labels from the radar's own signal processor.
-- `clutter = 1` : HCA codes 1 (Biological) and 2 (AP / Ground Clutter)
-- `rain    = 0` : HCA codes 3–10 (all meteorological classes)
-- Gates with codes 0 (Unclassified) or 11 (Unknown) are dropped.
-
-`phidp_deg` is not available in Level-III products and is stored as NULL.
+**Label source:** NEXRAD Level-III HCA (N0H) — ground-truth labels from the radar's own signal processor.
+- `clutter = 1` : HCA codes 10 (Biological), 20 (AP / Ground Clutter), 130 (Tornado Debris)
+- `rain    = 0` : HCA codes 30–100 (all meteorological classes)
+- `dropped`    : HCA code 140 (Unknown) and fill values
 
 ---
 
-## Status
+## Training Data
 
-- [x] Repo scaffolded
-- [x] Python venv (WSL)
-- [x] Docker Desktop + WSL integration (data moved to D drive)
-- [x] docker-compose finalized — Jupyter removed (runs from venv directly)
-- [x] PostgreSQL running and healthy (`localhost:5432`)
-- [x] Full docker-compose stack up (Postgres, Grafana, n8n, Elasticsearch, Kibana, scorer)
-- [x] DB schema applied (`sql/init_schema.sql`)
-- [x] NEXRAD Level-II ingestion (`ingest_nexrad.py`) — **deprecated**, heuristic labels caused AUC ~1.0
-- [x] NEXRAD Level-III ingestion (`ingest_nexrad_l3.py`) — HCA ground-truth labels (N0Q/N0X/N0C/N0K + N0H), Unidata THREDDS
-- [x] Batch ingestion (`batch_ingest.py`) — 12 scans, 4 sites (KBRO/KTLX/KAMX/KPBZ), 808k gates, 71.6% clutter / 28.4% rain
-- [x] Dataiku DSS 13.3.2 installed and connected to PostgreSQL (port 11000)
-- [x] Random Forest trained in Dataiku AutoML — 7 polarimetric features, AUC 1.0
-- [x] FastAPI scorer loads single `model/clf.pkl` (sklearn Pipeline — no sidecar files)
-- [x] `02_train.ipynb` written — Pipeline(PolarimetricEngineer → SimpleImputer → LightGBM), feature transforms (log1p range, sin/cos azimuth), SHAP, exports `model/clf.pkl`
-- [x] `01_eda.ipynb` run — null analysis, class balance, distributions, spatial patterns, feature transform visualizations
-- [x] `02_train.ipynb` run — LightGBM Pipeline trained, SHAP plots generated, `model/clf.pkl` exported
-- [x] `scorer/feature_engineering.py` — shared `PolarimetricEngineer` transformer (notebook + scorer import same class for pickle compatibility)
-- [x] n8n workflow validated — manual trigger → `/score_latest` → IF clutter > 40% → Alert/OK node (10k gates, 13.8% clutter, predictions written to `radar_predictions`)
-- [ ] Rebuild scorer Docker image (`docker compose build scorer && docker compose up -d scorer`) after clf.pkl retrained
-- [ ] n8n: fix `/score_latest` to only score unscored echoes (currently re-scores same top 10k rows)
-- [ ] n8n: add real alert channel (Slack / email / webhook)
-- [ ] n8n: cron trigger (replace manual trigger)
-- [ ] Grafana provisioning — datasource + dashboards auto-loaded on startup (committed to repo)
-- [ ] Live NEXRAD ingestion wired to n8n (AWS S3 / NOAA THREDDS → ingest → score cycle)
-- [ ] NEXRAD replay mode (simulate live feed from local file)
-- [ ] HCA label ingestion — replace heuristic labels with NEXRAD Level-III HCA ground truth
-- [ ] Offline packaging
+| Site | Location | Dates | Scans |
+|------|----------|-------|-------|
+| KBRO | Brownsville TX (Gulf Coast) | 15–17 Apr 2026 | 3 |
+| KTLX | Oklahoma City OK (Tornado Alley) | 15–17 Apr 2026 | 3 |
+| KAMX | Miami FL (subtropical) | 15–17 Apr 2026 | 3 |
+| KPBZ | Pittsburgh PA (Northeast) | 15–17 Apr 2026 | 3 |
+
+**Total:** 12 scans — 808,247 valid gates — 71.6% clutter / 28.4% rain
+**Split:** 9 scans train / 3 scans test (temporal split by scan, not by gate)
 
 ---
 
@@ -200,66 +177,49 @@ cd radar-echo-classifier
 
 ### 2. Start the stack
 
-Start all services:
 ```bash
 docker compose up -d
 ```
 
-Or start a single service (e.g. PostgreSQL only):
-```bash
-docker compose up -d postgres
-```
-
-Stop everything (data is preserved in Docker volumes):
-```bash
-docker compose down
-```
-
-### 3. Bootstrap the database and load synthetic data
+### 3. Initialise the database
 
 ```bash
-bash setup.sh
+docker compose exec postgres psql -U radar -d radar_db < sql/init_schema.sql
 ```
-
-This will:
-- Wait for PostgreSQL to be ready
-- Create the schema (`sql/init_schema.sql`)
-- Generate and insert 50 000 synthetic radar echoes (`generate_data.py`)
 
 ### 4. Open the tools
 
 | URL | Credentials |
 |-----|-------------|
-| http://localhost:8888 | Jupyter Lab (no password) |
 | http://localhost:3000 | Grafana (admin / admin) |
-| http://localhost:5601 | Kibana |
 | http://localhost:5678 | n8n (admin / admin) |
 | http://localhost:8000/docs | FastAPI Swagger UI |
-| http://localhost:9200 | Elasticsearch |
 
-### 5. Score a single echo
+### 5. Import the n8n workflow
+
+In n8n → Workflows → Import from file → select `n8n/workflow_score_latest.json`.
+
+### 6. Run a live scoring
 
 ```bash
-curl -X POST http://localhost:8000/predict \
+curl -X POST http://localhost:8000/score_nexrad \
   -H "Content-Type: application/json" \
-  -d '{"zh_dbz": 35, "zdr_db": 1.2, "rhohv": 0.97, "phidp_deg": 45, "azimuth": 120, "elevation": 2.5, "range_km": 80}'
+  -d '{"site": "KBRO", "scan_index": -1}'
 ```
 
-### 6. Connect to PostgreSQL directly
+### 7. Inject a test run into Grafana
 
-From WSL terminal (requires `psql`):
 ```bash
-psql -h localhost -U radar -d radar_db
-# password: radar
+curl -X POST http://localhost:8000/log_run \
+  -H "Content-Type: application/json" \
+  -d '{"site": "KBRO", "n_scored": 2910, "n_clutter": 350, "clutter_rate": 0.12}'
 ```
 
-Via Docker (no client needed):
+### 8. Connect to PostgreSQL directly
+
 ```bash
-docker exec -it radar-echo-classifier-postgres-1 psql -U radar -d radar_db
+docker compose exec postgres psql -U radar -d radar_db
 ```
-
-From a GUI client (DBeaver, TablePlus, DataGrip):
-- Host: `localhost`, Port: `5432`, DB: `radar_db`, User: `radar`, Password: `radar`
 
 ---
 

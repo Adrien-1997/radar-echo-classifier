@@ -9,6 +9,7 @@ Feature engineering (azimuth → sin/cos, range_km → log1p) is baked into the 
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +21,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from feature_engineering import PolarimetricEngineer  # noqa: F401 — required for joblib deserialization
+from nexrad_ingest import fetch_and_parse
 
 # Raw features fed into the pipeline (PolarimetricEngineer handles transforms internally)
 FEATURES = ["zh_dbz", "zdr_db", "rhohv", "azimuth", "range_km"]
@@ -61,6 +63,45 @@ class PredictionOutput(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "model_loaded": model is not None}
+
+
+class LogRunParams(BaseModel):
+    site: str = "KBRO"
+    date: Optional[str] = None
+    n_scored: int
+    n_clutter: int
+    clutter_rate: float
+
+
+@app.post("/log_run", response_model=ScoreNexradResult if False else dict)
+def log_run(params: LogRunParams):
+    """
+    Write a scoring run summary directly to radar_scoring_runs — no model, no NEXRAD fetch.
+    Useful for testing the Grafana dashboard or replaying historical stats.
+    """
+    date = params.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_id = str(uuid.uuid4())
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO radar_scoring_runs
+                    (run_id, site, scan_date, n_scored, n_clutter, clutter_rate)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (run_id, params.site, date, params.n_scored, params.n_clutter, params.clutter_rate),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"DB write failed: {e}")
+
+    logger.info("log_run run=%s site=%s clutter_rate=%.3f", run_id, params.site, params.clutter_rate)
+    return {"run_id": run_id, "site": params.site, "date": date,
+            "n_scored": params.n_scored, "n_clutter": params.n_clutter,
+            "clutter_rate": params.clutter_rate}
 
 
 class ScoreLatestParams(BaseModel):
@@ -141,6 +182,63 @@ def score_latest(params: ScoreLatestParams = ScoreLatestParams()):
     return ScoreLatestResult(
         run_id=run_id,
         n_scored=len(rows),
+        n_clutter=n_clutter,
+        clutter_rate=clutter_rate,
+    )
+
+
+class ScoreNexradParams(BaseModel):
+    site: str = "KBRO"
+    date: Optional[str] = None   # YYYY-MM-DD; defaults to today UTC
+    scan_index: int = -1          # -1 = latest available scan
+
+
+class ScoreNexradResult(BaseModel):
+    run_id: str
+    site: str
+    date: str
+    n_scored: int
+    n_clutter: int
+    clutter_rate: float
+
+
+@app.post("/score_nexrad", response_model=ScoreNexradResult)
+def score_nexrad(params: ScoreNexradParams = ScoreNexradParams()):
+    """
+    Fetch a live NEXRAD Level-III scan from Unidata THREDDS, score every gate,
+    and return clutter stats. No database read or write — fully self-contained.
+    """
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    date = params.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_id = str(uuid.uuid4())
+
+    try:
+        df = fetch_and_parse(params.site, date, params.scan_index)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"NEXRAD fetch failed: {e}")
+
+    if df.empty:
+        return ScoreNexradResult(
+            run_id=run_id, site=params.site, date=date,
+            n_scored=0, n_clutter=0, clutter_rate=0.0,
+        )
+
+    X = df[FEATURES].to_numpy(dtype=float)
+    probas = model.predict_proba(X)[:, 1]
+    preds = (probas >= 0.5).astype(int)
+
+    n_clutter = int(preds.sum())
+    clutter_rate = round(n_clutter / len(df), 4)
+    logger.info("run=%s site=%s date=%s scored=%d clutter_rate=%.3f",
+                run_id, params.site, date, len(df), clutter_rate)
+
+    return ScoreNexradResult(
+        run_id=run_id,
+        site=params.site,
+        date=date,
+        n_scored=len(df),
         n_clutter=n_clutter,
         clutter_rate=clutter_rate,
     )

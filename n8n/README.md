@@ -1,61 +1,48 @@
-# n8n Workflow — Automated Scoring and Alerting
+# n8n Workflow — Live NEXRAD Scoring and Alerting
 
-> **Status:** not yet deployed. n8n container not yet started.
+Access n8n at **http://localhost:5678** (credentials: `admin` / `admin`).
 
-Access n8n at **http://localhost:5678** (credentials: `admin` / `admin`) once started:
-```bash
-docker compose up -d n8n
-```
-
-## Workflow to build
-
-### Trigger: Cron
-
-- Schedule: every 15 minutes (or configurable)
-- Kicks off the scoring pipeline for the most recent radar echoes
-
-### Step 1 — Query PostgreSQL
-
-- Node type: **Postgres**
-- Query: fetch the last N radar echoes from `radar_echoes` that have not yet been scored (left join on `radar_predictions`)
-- Output: list of echo rows with polarimetric features
-
-### Step 2 — HTTP Request to FastAPI scorer
-
-- Node type: **HTTP Request**
-- Method: POST
-- URL: `http://scorer:8000/predict`
-- Body: one echo at a time (or batch with a loop node)
-- Output: `clutter_proba`, `prediction`
-
-### Step 3 — Write predictions back to PostgreSQL
-
-- Node type: **Postgres**
-- Insert each prediction into `radar_predictions` with the corresponding `echo_id` and a generated `run_id` (UUID)
-
-### Step 4 — Compute run clutter rate
-
-- Node type: **Function** (JavaScript)
-- Calculate `clutter_rate = count(prediction == 1) / total`
-
-### Step 5 — IF condition
-
-- Node type: **IF**
-- Condition: `clutter_rate > 0.4`
-
-### Step 6a — Alert (clutter rate high)
-
-- Node type: **Slack** / **Email** / **Webhook** (choose your preferred channel)
-- Message: `[radar-echo-classifier] High clutter rate detected: {{ clutter_rate }} for run {{ run_id }}`
-
-### Step 6b — No alert (clutter rate normal)
-
-- Node type: **NoOp** or log to a monitoring endpoint
+Import the workflow: **Workflows → Import from file → `n8n/workflow_score_latest.json`**
 
 ---
 
-## Tips
+## Workflow: Radar Live Scoring
 
-- Export completed workflows to `n8n/` as JSON for version control
-- Use the n8n environment variables in docker-compose to persist credentials
-- The `scorer` service is reachable inside the Docker network as `http://scorer:8000`
+```
+Manual Trigger
+  → Parameters (site, scan_index)
+  → Score Nexrad  ──┬──→ Log Run          (writes to radar_scoring_runs → Grafana)
+                    └──→ Clutter > 40%?
+                              yes → Alert → Grafana Annotation (red marker on dashboard)
+                              no  → OK
+```
+
+### Nodes
+
+| Node | Type | Description |
+|------|------|-------------|
+| **Manual Trigger** | Trigger | Starts the workflow on demand |
+| **Parameters** | Set | Defines `site` (default: `KBRO`) and `scan_index` (default: `-1` = latest) |
+| **Score Nexrad** | HTTP POST | `POST scorer:8000/score_nexrad` — fetches live scan from Unidata THREDDS, scores all gates in memory, returns `clutter_rate`, `n_clutter`, `n_scored`, `site`, `date` |
+| **Log Run** | HTTP POST | `POST scorer:8000/log_run` — persists the run summary to `radar_scoring_runs` (feeds Grafana dashboard) |
+| **Clutter > 40%?** | If | Branches on `clutter_rate > 0.4` |
+| **Alert** | Set | Formats the alert message with site, date, clutter % and gate counts |
+| **Grafana Annotation** | HTTP POST | `POST grafana:3000/api/annotations` — places a red vertical marker on the Grafana dashboard |
+| **OK** | Set | Formats a normal status message (no further action) |
+
+### Configurable parameters
+
+Edit the **Parameters** node to change:
+- `site` — 4-letter ICAO radar code (e.g. `KBRO`, `KTLX`, `KAMX`, `KPBZ`)
+- `scan_index` — `-1` for the latest scan of the day, `0` for the first
+
+---
+
+## Scorer endpoints used
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /score_nexrad` | Fetch + score a live NEXRAD scan (no DB read required) |
+| `POST /log_run` | Write a run summary row to `radar_scoring_runs` |
+
+See `scorer/main.py` or http://localhost:8000/docs for the full API.

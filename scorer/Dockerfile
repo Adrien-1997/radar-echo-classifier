@@ -7,7 +7,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py feature_engineering.py ./
+COPY main.py feature_engineering.py nexrad_ingest.py ./
 
 EXPOSE 8000
 

@@ -44,6 +44,8 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   n8n:
     image: n8nio/n8n
@@ -61,7 +63,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./model:/dss_model:ro
+      - ./model:/model:ro
     environment:
       - DATABASE_URL=postgresql://radar:radar@postgres:5432/radar_db
     depends_on:

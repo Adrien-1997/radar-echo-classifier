@@ -1,5 +1,5 @@
 {
-  "name": "Radar Clutter Scoring",
+  "name": "Radar Live Scoring",
   "nodes": [
     {
       "parameters": {},
@@ -11,18 +11,44 @@
     },
     {
       "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "param-site",
+              "name": "site",
+              "value": "KBRO",
+              "type": "string"
+            },
+            {
+              "id": "param-scan-index",
+              "name": "scan_index",
+              "value": -1,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0006-0000-0000-000000000006",
+      "name": "Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "http://scorer:8000/score_latest",
+        "url": "http://scorer:8000/score_nexrad",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"limit\": 10000\n}",
+        "jsonBody": "={\n  \"site\": \"{{ $json.site }}\",\n  \"scan_index\": {{ $json.scan_index }}\n}",
         "options": {}
       },
       "id": "a1b2c3d4-0002-0000-0000-000000000002",
-      "name": "Score Latest",
+      "name": "Score Nexrad",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300]
+      "position": [680, 300]
     },
     {
       "parameters": {
@@ -51,7 +77,7 @@
       "name": "Clutter > 40%?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [900, 300]
     },
     {
       "parameters": {
@@ -66,7 +92,7 @@
             {
               "id": "alert-2",
               "name": "message",
-              "value": "=High clutter rate: {{ ($json.clutter_rate * 100).toFixed(1) }}% ({{ $json.n_clutter }}/{{ $json.n_scored }} gates) — run {{ $json.run_id }}",
+              "value": "=High clutter rate: {{ ($json.clutter_rate * 100).toFixed(1) }}% ({{ $json.n_clutter }}/{{ $json.n_scored }} gates) — {{ $json.site }} {{ $json.date }} run {{ $json.run_id }}",
               "type": "string"
             },
             {
@@ -80,6 +106,18 @@
               "name": "clutter_rate",
               "value": "={{ $json.clutter_rate }}",
               "type": "number"
+            },
+            {
+              "id": "alert-5",
+              "name": "site",
+              "value": "={{ $json.site }}",
+              "type": "string"
+            },
+            {
+              "id": "alert-6",
+              "name": "date",
+              "value": "={{ $json.date }}",
+              "type": "string"
             }
           ]
         },
@@ -89,7 +127,7 @@
       "name": "Alert",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [900, 200]
+      "position": [1120, 200]
     },
     {
       "parameters": {
@@ -104,7 +142,7 @@
             {
               "id": "ok-2",
               "name": "message",
-              "value": "=Normal clutter rate: {{ ($json.clutter_rate * 100).toFixed(1) }}% ({{ $json.n_clutter }}/{{ $json.n_scored }} gates) — run {{ $json.run_id }}",
+              "value": "=Normal clutter rate: {{ ($json.clutter_rate * 100).toFixed(1) }}% ({{ $json.n_clutter }}/{{ $json.n_scored }} gates) — {{ $json.site }} {{ $json.date }} run {{ $json.run_id }}",
               "type": "string"
             },
             {
@@ -118,6 +156,18 @@
               "name": "clutter_rate",
               "value": "={{ $json.clutter_rate }}",
               "type": "number"
+            },
+            {
+              "id": "ok-5",
+              "name": "site",
+              "value": "={{ $json.site }}",
+              "type": "string"
+            },
+            {
+              "id": "ok-6",
+              "name": "date",
+              "value": "={{ $json.date }}",
+              "type": "string"
             }
           ]
         },
@@ -127,7 +177,46 @@
       "name": "OK",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [900, 400]
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://grafana:3000/api/annotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Basic YWRtaW46YWRtaW4="
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $json.message }}\",\n  \"tags\": [\"clutter\", \"alert\", \"{{ $json.site }}\"],\n  \"time\": {{ Date.now() }}\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-0000-0000-000000000007",
+      "name": "Grafana Annotation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://scorer:8000/log_run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"site\": \"{{ $json.site }}\",\n  \"date\": \"{{ $json.date }}\",\n  \"n_scored\": {{ $json.n_scored }},\n  \"n_clutter\": {{ $json.n_clutter }},\n  \"clutter_rate\": {{ $json.clutter_rate }}\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0008-0000-0000-000000000008",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 500]
     }
   ],
   "connections": {
@@ -135,18 +224,34 @@
       "main": [
         [
           {
-            "node": "Score Latest",
+            "node": "Parameters",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Score Latest": {
+    "Parameters": {
+      "main": [
+        [
+          {
+            "node": "Score Nexrad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Nexrad": {
       "main": [
         [
           {
             "node": "Clutter > 40%?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Run",
             "type": "main",
             "index": 0
           }
@@ -165,6 +270,17 @@
         [
           {
             "node": "OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert": {
+      "main": [
+        [
+          {
+            "node": "Grafana Annotation",
             "type": "main",
             "index": 0
           }

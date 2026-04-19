@@ -1,56 +1,39 @@
 # Grafana Dashboards
 
-> **Status:** not yet deployed. Grafana container not yet started.
+Access Grafana at **http://localhost:3000** (credentials: `admin` / `admin`).
 
-Access Grafana at **http://localhost:3000** (default credentials: `admin` / `admin`) once started:
-```bash
-docker compose up -d grafana
-```
-
-Connect Grafana to PostgreSQL as a data source:
-- Host: `postgres:5432`
-- Database: `radar_db`
-- User: `radar`
-- Password: `radar`
-- SSL mode: disable
+The datasource and dashboards are **auto-provisioned** on startup from `grafana/provisioning/` — no manual setup needed.
 
 ---
 
-## Dashboards to build
+## Radar Clutter Monitor
 
-### 1. Clutter Rate — Time Series
+Dashboard file: `grafana/dashboards/clutter_monitor.json`
 
-- Data source: PostgreSQL
-- Query: rolling 1-hour clutter rate from `radar_predictions` joined with `radar_echoes`
-- Panel type: Time series
-- Alert threshold line at 40%
-- Useful for monitoring drift in clutter prevalence over time
+### Panels
 
-### 2. Rolling AUC
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Clutter Rate Over Time** | Time series | `clutter_rate` per run over the last 24h — red threshold line at 40% |
+| **Last Clutter Rate** | Stat | Most recent clutter rate — green/red background |
+| **Last Site** | Stat | ICAO code of the last scored site |
+| **Runs (last 24h)** | Stat | Total number of scoring runs in the last 24 hours |
+| **Alerts Today** | Stat | Runs where `clutter_rate > 0.4` in the last 24 hours |
+| **Recent Runs** | Table | Last 20 runs with site, scan date, clutter %, gate counts — color-coded |
 
-- Data source: PostgreSQL
-- Query: compute AUC per `run_id` using a stored procedure or pre-aggregated table
-- Panel type: Stat / Time series
-- Requires a ground-truth label comparison — link `radar_predictions.echo_id` back to `radar_echoes.label`
+All panels query `radar_scoring_runs` (one row per n8n workflow execution).
 
-### 3. Azimuth / Elevation Heatmap
+### Annotations
 
-- Data source: PostgreSQL
-- Query: average `clutter_proba` grouped by azimuth bin (5°) and elevation bin (1°)
-- Panel type: Heatmap
-- Reveals spatial patterns of clutter (e.g., ground clutter near 0° elevation)
-
-### 4. Pipeline Latency
-
-- Data source: PostgreSQL
-- Query: `predicted_at - timestamp` per prediction as pipeline latency
-- Panel type: Histogram or Time series
-- Useful for detecting slowdowns in the scoring pipeline
+Red vertical markers appear on the time series when n8n detects clutter and posts to `POST grafana:3000/api/annotations` with tags `["clutter", "alert", "<site>"]`.
 
 ---
 
-## Tips
+## Provisioning
 
-- Save dashboard JSON exports to this folder for version control
-- Use Grafana provisioning (`grafana/provisioning/`) to load dashboards automatically on startup
-- Tag dashboards with `radar` and `clutter` for easy filtering
+| File | Purpose |
+|------|---------|
+| `grafana/provisioning/datasources/postgres.yaml` | Configures the `RadarDB` PostgreSQL datasource |
+| `grafana/provisioning/dashboards/provider.yaml` | Tells Grafana to load dashboards from `/var/lib/grafana/dashboards` |
+
+Both are mounted read-only in `docker-compose.yml`.
