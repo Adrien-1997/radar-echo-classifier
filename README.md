@@ -92,7 +92,7 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 | **Grafana** | Real-time dashboards: clutter rate, rolling AUC, latency — see [grafana/dashboards/README.md](grafana/dashboards/README.md) |
 | **n8n** | Workflow automation: cron scoring, alerting when clutter rate > 40% — see [n8n/README.md](n8n/README.md) |
 | **Jupyter Lab** | EDA, model training (`02_train.ipynb`), SHAP explainability — runs directly from venv, not Docker |
-| **FastAPI scorer** | REST API to serve model predictions (`/predict`) — loads `model/clf.pkl` (sklearn Pipeline) |
+| **FastAPI scorer** | REST API to serve model predictions (`/predict`) — loads `model/clf.pkl` (sklearn Pipeline with `PolarimetricEngineer` feature transforms) |
 | **Dataiku** | Visual ML lab, AutoML, training only (external, port 11000) — not in Docker Compose |
 
 ---
@@ -117,6 +117,7 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 ```
 radar-echo-classifier/
 ├── notebooks/           # Jupyter notebooks (EDA, training, SHAP)
+├── scorer/feature_engineering.py  # PolarimetricEngineer — shared by notebook + scorer
 ├── model/               # Drop clf.pkl here to update the scorer (gitignored)
 ├── figures/             # SHAP plots output by 02_train.ipynb
 ├── sql/                 # Schema DDL and query helpers
@@ -147,7 +148,12 @@ radar-echo-classifier/
 | `elevation` | Beam elevation (°) |
 | `range_km` | Range from radar (km) |
 
-**Label rule (synthetic):** `clutter = 1` if `rhohv < 0.85` OR (`zh_dbz > 45` AND `zdr_db < 0`), else `rain = 0`.
+**Label source:** NEXRAD Level-III HCA (Hydrometeor Classification Algorithm) — ground-truth labels from the radar's own signal processor.
+- `clutter = 1` : HCA codes 1 (Biological) and 2 (AP / Ground Clutter)
+- `rain    = 0` : HCA codes 3–10 (all meteorological classes)
+- Gates with codes 0 (Unclassified) or 11 (Unknown) are dropped.
+
+`phidp_deg` is not available in Level-III products and is stored as NULL.
 
 ---
 
@@ -160,17 +166,23 @@ radar-echo-classifier/
 - [x] PostgreSQL running and healthy (`localhost:5432`)
 - [x] Full docker-compose stack up (Postgres, Grafana, n8n, Elasticsearch, Kibana, scorer)
 - [x] DB schema applied (`sql/init_schema.sql`)
-- [x] NEXRAD ingestion script (`ingest_nexrad.py`) — downloads from Unidata THREDDS, parses with Py-ART, bulk-inserts via COPY
-- [x] Batch ingestion (`batch_ingest.py`) — 10 scans, 4 sites (KBRO/KTLX/KAMX/KPBZ), 8.93M gates, 27.8% clutter
+- [x] NEXRAD Level-II ingestion (`ingest_nexrad.py`) — **deprecated**, heuristic labels caused AUC ~1.0
+- [x] NEXRAD Level-III ingestion (`ingest_nexrad_l3.py`) — HCA ground-truth labels (N0Q/N0X/N0C/N0K + N0H), Unidata THREDDS
+- [x] Batch ingestion (`batch_ingest.py`) — 12 scans, 4 sites (KBRO/KTLX/KAMX/KPBZ), 808k gates, 71.6% clutter / 28.4% rain
 - [x] Dataiku DSS 13.3.2 installed and connected to PostgreSQL (port 11000)
 - [x] Random Forest trained in Dataiku AutoML — 7 polarimetric features, AUC 1.0
 - [x] FastAPI scorer loads single `model/clf.pkl` (sklearn Pipeline — no sidecar files)
-- [x] `02_train.ipynb` written — Pipeline(SimpleImputer → StandardScaler → LightGBM), SHAP, exports `model/clf.pkl`
-- [ ] Run `01_eda.ipynb`
+- [x] `02_train.ipynb` written — Pipeline(PolarimetricEngineer → SimpleImputer → LightGBM), feature transforms (log1p range, sin/cos azimuth), SHAP, exports `model/clf.pkl`
+- [x] `01_eda.ipynb` run — null analysis, class balance, distributions, spatial patterns, feature transform visualizations
 - [x] `02_train.ipynb` run — LightGBM Pipeline trained, SHAP plots generated, `model/clf.pkl` exported
-- [ ] n8n workflow (cron → PostgreSQL → scorer → alert)
-- [ ] Grafana dashboards
-- [ ] Elasticsearch + Kibana
+- [x] `scorer/feature_engineering.py` — shared `PolarimetricEngineer` transformer (notebook + scorer import same class for pickle compatibility)
+- [x] n8n workflow validated — manual trigger → `/score_latest` → IF clutter > 40% → Alert/OK node (10k gates, 13.8% clutter, predictions written to `radar_predictions`)
+- [ ] Rebuild scorer Docker image (`docker compose build scorer && docker compose up -d scorer`) after clf.pkl retrained
+- [ ] n8n: fix `/score_latest` to only score unscored echoes (currently re-scores same top 10k rows)
+- [ ] n8n: add real alert channel (Slack / email / webhook)
+- [ ] n8n: cron trigger (replace manual trigger)
+- [ ] Grafana provisioning — datasource + dashboards auto-loaded on startup (committed to repo)
+- [ ] Live NEXRAD ingestion wired to n8n (AWS S3 / NOAA THREDDS → ingest → score cycle)
 - [ ] NEXRAD replay mode (simulate live feed from local file)
 - [ ] HCA label ingestion — replace heuristic labels with NEXRAD Level-III HCA ground truth
 - [ ] Offline packaging

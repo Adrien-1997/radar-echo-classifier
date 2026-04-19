@@ -1,8 +1,9 @@
 """
 FastAPI scorer — serves rain/clutter predictions.
 
-Loads a single sklearn Pipeline (imputer + scaler + classifier) from clf.pkl.
-The pipeline is produced by notebooks/02_shap.ipynb and dropped in model/.
+Loads a single sklearn Pipeline (PolarimetricEngineer → SimpleImputer → LightGBM) from clf.pkl.
+The pipeline is produced by notebooks/02_train.ipynb and dropped in model/.
+Feature engineering (azimuth → sin/cos, range_km → log1p) is baked into the pipeline.
 """
 
 import logging
@@ -18,15 +19,17 @@ import psycopg2.extras
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Feature order must match 02_shap.ipynb training order
-FEATURES = ["zh_dbz", "zdr_db", "kdp_deg_km", "rhohv", "phidp_deg", "azimuth", "elevation", "range_km"]
+from feature_engineering import PolarimetricEngineer  # noqa: F401 — required for joblib deserialization
+
+# Raw features fed into the pipeline (PolarimetricEngineer handles transforms internally)
+FEATURES = ["zh_dbz", "zdr_db", "rhohv", "azimuth", "range_km"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Radar Echo Scorer", version="0.3.0")
+app = FastAPI(title="Radar Echo Scorer", version="0.4.0")
 
-MODEL_DIR = Path(os.getenv("MODEL_DIR", "/dss_model"))
+MODEL_DIR = Path(os.getenv("MODEL_DIR", "/model"))
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://radar:radar@postgres:5432/radar_db")
 clf_path = MODEL_DIR / "clf.pkl"
 
@@ -41,12 +44,13 @@ else:
 class EchoInput(BaseModel):
     zh_dbz: Optional[float] = None
     zdr_db: Optional[float] = None
-    kdp_deg_km: Optional[float] = None
     rhohv: Optional[float] = None
-    phidp_deg: Optional[float] = None
     azimuth: float
-    elevation: float
     range_km: float
+    # Legacy fields — accepted for backward compat but not used by the pipeline
+    kdp_deg_km: Optional[float] = None
+    phidp_deg: Optional[float] = None
+    elevation: Optional[float] = None
 
 
 class PredictionOutput(BaseModel):
@@ -90,8 +94,7 @@ def score_latest(params: ScoreLatestParams = ScoreLatestParams()):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT id, zh_dbz, zdr_db, kdp_deg_km, rhohv, phidp_deg,
-                       azimuth, elevation, range_km
+                SELECT id, zh_dbz, zdr_db, rhohv, azimuth, range_km
                 FROM radar_echoes
                 ORDER BY id DESC
                 LIMIT %s
@@ -105,8 +108,7 @@ def score_latest(params: ScoreLatestParams = ScoreLatestParams()):
             return ScoreLatestResult(run_id=run_id, n_scored=0, n_clutter=0, clutter_rate=0.0)
 
         X = np.array(
-            [[r["zh_dbz"], r["zdr_db"], r["kdp_deg_km"], r["rhohv"],
-              r["phidp_deg"], r["azimuth"], r["elevation"], r["range_km"]]
+            [[r["zh_dbz"], r["zdr_db"], r["rhohv"], r["azimuth"], r["range_km"]]
              for r in rows],
             dtype=float,
         )
@@ -153,11 +155,8 @@ def predict(echo: EchoInput):
         raw = np.array([[
             echo.zh_dbz,
             echo.zdr_db,
-            echo.kdp_deg_km,
             echo.rhohv,
-            echo.phidp_deg,
             echo.azimuth,
-            echo.elevation,
             echo.range_km,
         ]], dtype=float)  # NaN for None fields — pipeline imputer handles these
         clutter_proba = float(model.predict_proba(raw)[0, 1])
