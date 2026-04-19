@@ -1,4 +1,12 @@
 """
+DEPRECATED — superseded by ingest_nexrad_l3.py.
+
+Labels here are heuristic (derived from features), causing AUC ~1.0 during training.
+Use ingest_nexrad_l3.py instead, which uses NEXRAD Level-III HCA ground-truth labels.
+Kept for reference only.
+
+---
+
 NEXRAD Level-II ingestion script.
 
 Downloads one scan from the public AWS S3 bucket (noaa-nexrad-level2),

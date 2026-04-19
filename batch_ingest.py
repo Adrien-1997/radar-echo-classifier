@@ -1,59 +1,48 @@
 """
-Batch NEXRAD ingestion — multiple sites and dates in one pass.
+Batch NEXRAD Level-III ingestion — multiple sites and dates in one pass.
 
-Reuses all logic from ingest_nexrad.py. Skips already-downloaded files.
-Each (site, date, scan_index) tuple produces one ingest run.
+Reuses ingest_nexrad_l3.ingest_l3(). Skips already-downloaded files.
+Dates chosen for geographic / meteorological variety:
+  KBRO  — Brownsville TX    (Gulf Coast, tropical)
+  KTLX  — Oklahoma City OK  (Tornado Alley, convective)
+  KAMX  — Miami FL          (subtropical, heavy rain)
+  KPBZ  — Pittsburgh PA     (Northeast, stratiform)
+
+Usage:
+    python batch_ingest.py
 """
 
 import logging
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
 
-from ingest_nexrad import download_scan, insert_to_db, list_scans, parse_scan
+from ingest_nexrad_l3 import ingest_l3
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-# Sites chosen for geographic / meteorological variety:
-#   KBRO  — Brownsville TX    (Gulf Coast, tropical)
-#   KTLX  — Oklahoma City OK  (Tornado Alley, convective)
-#   KAMX  — Miami FL          (subtropical, heavy rain)
-#   KPBZ  — Pittsburgh PA     (Northeast, stratiform)
+# (site, date, scan_index)
 TARGETS = [
-    # (site, date, scan_index)   note: KBRO/2026-04-11/0 already ingested
-    ("KBRO",  "2026-04-10", 0),
-    ("KBRO",  "2026-04-12", 0),
-    ("KTLX",  "2026-04-10", 0),
-    ("KTLX",  "2026-04-11", 0),
-    ("KTLX",  "2026-04-12", 0),
-    ("KAMX",  "2026-04-10", 0),
-    ("KAMX",  "2026-04-11", 0),
-    ("KAMX",  "2026-04-12", 0),
-    ("KPBZ",  "2026-04-10", 0),
-    ("KPBZ",  "2026-04-11", 0),
+    ("KBRO", "2026-04-17", 0),
+    ("KBRO", "2026-04-16", 0),
+    ("KBRO", "2026-04-15", 0),
+    ("KTLX", "2026-04-17", 0),
+    ("KTLX", "2026-04-16", 0),
+    ("KTLX", "2026-04-15", 0),
+    ("KAMX", "2026-04-17", 0),
+    ("KAMX", "2026-04-16", 0),
+    ("KAMX", "2026-04-15", 0),
+    ("KPBZ", "2026-04-17", 0),
+    ("KPBZ", "2026-04-16", 0),
+    ("KPBZ", "2026-04-15", 0),
 ]
-
-data_dir = Path("data")
-data_dir.mkdir(exist_ok=True)
 
 ok, failed = 0, []
 
 for site, date, idx in TARGETS:
     tag = f"{site}/{date}[{idx}]"
     try:
-        filenames = list_scans(site, date)
-        if not filenames:
-            log.warning("%s — no scans found, skipping", tag)
-            continue
-        if idx >= len(filenames):
-            log.warning("%s — index %d out of range (%d scans), skipping", tag, idx, len(filenames))
-            continue
-        filename = filenames[idx]
-        log.info("=== %s  →  %s ===", tag, filename)
-        local_path = download_scan(filename, site, date, data_dir)
-        df = parse_scan(local_path)
-        insert_to_db(df)
+        log.info("=== %s ===", tag)
+        ingest_l3(site, date, idx)
         ok += 1
     except Exception as exc:
         log.error("%s FAILED: %s", tag, exc)
