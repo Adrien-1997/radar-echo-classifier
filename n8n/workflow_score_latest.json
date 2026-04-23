@@ -1,12 +1,22 @@
 {
+  "id": "radar-live-scoring-v1",
   "name": "Radar Live Scoring",
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "* * * * *"
+            }
+          ]
+        }
+      },
       "id": "a1b2c3d4-0001-0000-0000-000000000001",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
+      "name": "Every 1 Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
       "position": [240, 300]
     },
     {
@@ -220,7 +230,7 @@
     }
   ],
   "connections": {
-    "Manual Trigger": {
+    "Every 1 Minute": {
       "main": [
         [
           {

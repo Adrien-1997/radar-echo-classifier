@@ -1,10 +1,11 @@
 {
-  "title": "Radar Clutter Monitor",
+  "title": "RADAR CLUTTER — OPS CONSOLE",
   "uid": "radar-clutter-v1",
   "schemaVersion": 38,
-  "version": 2,
-  "refresh": "30s",
-  "time": { "from": "now-24h", "to": "now" },
+  "version": 4,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "graphTooltip": 1,
   "annotations": {
     "list": [
       {
@@ -34,9 +35,105 @@
   "panels": [
     {
       "id": 1,
-      "title": "Clutter Rate Over Time",
+      "title": "THREAT LEVEL",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 5 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
+          "rawQuery": true,
+          "rawSql": "SELECT clutter_rate FROM radar_scoring_runs ORDER BY scored_at DESC LIMIT 1",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.2 },
+              { "color": "red", "value": 0.4 }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": 0, "to": 0.199,
+                "result": { "index": 0, "text": "NOMINAL", "color": "green" }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 0.2, "to": 0.399,
+                "result": { "index": 1, "text": "ELEVATED", "color": "orange" }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 0.4, "to": 1,
+                "result": { "index": 2, "text": "ALERT", "color": "red" }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "text": { "valueSize": 72 }
+      }
+    },
+    {
+      "id": 2,
+      "title": "CLUTTER INDEX",
+      "type": "gauge",
+      "gridPos": { "x": 0, "y": 5, "w": 5, "h": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
+          "rawQuery": true,
+          "rawSql": "SELECT clutter_rate FROM radar_scoring_runs ORDER BY scored_at DESC LIMIT 1",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.2 },
+              { "color": "red", "value": 0.4 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "text": { "valueSize": 24 }
+      }
+    },
+    {
+      "id": 3,
+      "title": "CLUTTER RATE — LIVE FEED",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "gridPos": { "x": 5, "y": 5, "w": 13, "h": 8 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
       "targets": [
         {
@@ -73,45 +170,46 @@
       }
     },
     {
-      "id": 2,
-      "title": "Last Clutter Rate",
+      "id": 9,
+      "title": "AVG CLUTTER — 1H",
       "type": "stat",
-      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 4 },
+      "gridPos": { "x": 18, "y": 5, "w": 6, "h": 8 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
           "rawQuery": true,
-          "rawSql": "SELECT clutter_rate FROM radar_scoring_runs ORDER BY scored_at DESC LIMIT 1",
+          "rawSql": "SELECT ROUND((AVG(clutter_rate) * 100)::numeric, 1) AS avg_clutter FROM radar_scoring_runs WHERE scored_at >= NOW() - INTERVAL '1 hour'",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "percent",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "red", "value": 0.4 }
+              { "color": "orange", "value": 20 },
+              { "color": "red", "value": 40 }
             ]
-          },
-          "mappings": []
+          }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": { "calcs": ["last"] },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "auto"
+        "textMode": "auto",
+        "text": { "valueSize": 48 }
       }
     },
     {
-      "id": 3,
-      "title": "Last Site",
+      "id": 4,
+      "title": "ACTIVE SITE",
       "type": "stat",
-      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 4 },
+      "gridPos": { "x": 0, "y": 13, "w": 6, "h": 3 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
       "targets": [
         {
@@ -123,37 +221,34 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "blue" },
-          "mappings": []
-        }
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": { "calcs": ["last"] },
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto"
       }
     },
     {
-      "id": 4,
-      "title": "Runs (last 24h)",
+      "id": 5,
+      "title": "GATES SCORED — LAST RUN",
       "type": "stat",
-      "gridPos": { "x": 12, "y": 10, "w": 6, "h": 4 },
+      "gridPos": { "x": 6, "y": 13, "w": 6, "h": 3 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS count FROM radar_scoring_runs WHERE scored_at >= NOW() - INTERVAL '24 hours'",
+          "rawSql": "SELECT n_scored FROM radar_scoring_runs ORDER BY scored_at DESC LIMIT 1",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "text" },
-          "mappings": []
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "text" }
         }
       },
       "options": {
@@ -164,17 +259,42 @@
       }
     },
     {
-      "id": 5,
-      "title": "Alerts Today",
+      "id": 6,
+      "title": "SCANS — LAST HOUR",
       "type": "stat",
-      "gridPos": { "x": 18, "y": 10, "w": 6, "h": 4 },
+      "gridPos": { "x": 12, "y": 13, "w": 6, "h": 3 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS alerts FROM radar_scoring_runs WHERE clutter_rate > 0.4 AND scored_at >= NOW() - INTERVAL '24 hours'",
+          "rawSql": "SELECT COUNT(*) AS count FROM radar_scoring_runs WHERE scored_at >= NOW() - INTERVAL '1 hour'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "title": "ALERTS — LAST HOUR",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 13, "w": 6, "h": 3 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS alerts FROM radar_scoring_runs WHERE clutter_rate > 0.4 AND scored_at >= NOW() - INTERVAL '1 hour'",
           "format": "table"
         }
       ],
@@ -186,8 +306,7 @@
               { "color": "green", "value": null },
               { "color": "red", "value": 1 }
             ]
-          },
-          "mappings": []
+          }
         }
       },
       "options": {
@@ -198,17 +317,17 @@
       }
     },
     {
-      "id": 6,
-      "title": "Recent Runs",
+      "id": 8,
+      "title": "SCAN LOG",
       "type": "table",
-      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 8 },
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "radardb" },
           "rawQuery": true,
-          "rawSql": "SELECT scored_at AS \"Time\", site AS \"Site\", scan_date AS \"Scan Date\", ROUND((clutter_rate * 100)::numeric, 1) AS \"Clutter %\", n_clutter AS \"Clutter Gates\", n_scored AS \"Total Gates\" FROM radar_scoring_runs ORDER BY scored_at DESC LIMIT 20",
+          "rawSql": "SELECT scored_at AS \"Time\", site AS \"Site\", ROUND((clutter_rate * 100)::numeric, 1) AS \"Clutter %\", n_clutter AS \"Clutter Gates\", n_scored AS \"Total Gates\", CASE WHEN clutter_rate > 0.4 THEN 'ALERT' WHEN clutter_rate > 0.2 THEN 'ELEVATED' ELSE 'NOMINAL' END AS \"Status\" FROM radar_scoring_runs ORDER BY scored_at DESC LIMIT 30",
           "format": "table"
         }
       ],
@@ -224,9 +343,25 @@
                   "mode": "absolute",
                   "steps": [
                     { "color": "green", "value": null },
+                    { "color": "orange", "value": 20 },
                     { "color": "red", "value": 40 }
                   ]
                 }
+              },
+              { "id": "custom.displayMode", "value": "color-background" },
+              { "id": "unit", "value": "percent" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "NOMINAL":  { "text": "NOMINAL",  "color": "green",  "index": 0 } } },
+                  { "type": "value", "options": { "ELEVATED": { "text": "ELEVATED", "color": "orange", "index": 1 } } },
+                  { "type": "value", "options": { "ALERT":    { "text": "ALERT",    "color": "red",    "index": 2 } } }
+                ]
               },
               { "id": "custom.displayMode", "value": "color-background" }
             ]

@@ -49,6 +49,14 @@ services:
 
   n8n:
     image: n8nio/n8n
+    # Import the committed workflow on every startup (idempotent — stable "id" in JSON).
+    # Falls back gracefully: if import fails, n8n still starts and manual import remains possible.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        n8n import:workflow --input=/workflows/workflow_score_latest.json || true
+        exec n8n
     ports:
       - "5678:5678"
     environment:
@@ -57,6 +65,7 @@ services:
       - N8N_BASIC_AUTH_PASSWORD=admin
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./n8n:/workflows:ro
 
   scorer:
     build: ./scorer

@@ -4,6 +4,23 @@ End-to-end ML pipeline for meteorological radar echo classification (rain vs clu
 
 ---
 
+## Current Status
+
+| # | Item | Status |
+|---|------|--------|
+| ✅ | Full Docker stack (Postgres, Grafana, n8n, ES, Kibana, FastAPI scorer) | Done |
+| ✅ | NEXRAD Level-III ingestion — 808k gates, 4 sites, HCA labels | Done |
+| ✅ | LightGBM model — `PolarimetricEngineer → SimpleImputer → LGBMClassifier` | Done |
+| ✅ | FastAPI scorer — `/predict`, `/score_latest`, `/score_nexrad`, `/log_run` | Done |
+| ✅ | Grafana dashboard auto-provisioned from repo | Done |
+| ✅ | n8n workflow auto-imported on stack startup (idempotent) | Done |
+| 🔧 | `/score_latest` deduplication — re-scores same gates on every call | Next |
+| 🔧 | Automated tests — `PolarimetricEngineer`, `/predict`, `/score_nexrad` | Backlog |
+| 🔧 | n8n cron trigger + real alert channel | Backlog |
+| 🔧 | Offline packaging — `docker save` + pip wheels for air-gapped deploy | Backlog (J14) |
+
+---
+
 ## Overview
 
 Weather radars return echoes from both precipitation and non-meteorological sources (ground clutter, insects, anomalous propagation, etc.). This project builds a full ML pipeline to classify each radar **gate** as **rain** or **clutter** using dual-polarization variables, and wraps it in a production stack: live ingestion, automated scoring, alerting, and dashboarding.
@@ -78,7 +95,7 @@ Weather radars return echoes from both precipitation and non-meteorological sour
 |-----------|------|
 | **PostgreSQL 15** | Raw gate storage, predictions, run summaries |
 | **FastAPI scorer** | REST scoring API — loads `model/clf.pkl` |
-| **n8n** | Orchestration: live NEXRAD fetch → score → log → Grafana alert |
+| **n8n** | Orchestration: live NEXRAD fetch → score → log → Grafana alert — workflow auto-imported on startup |
 | **Grafana** | Real-time dashboard — fed by `radar_scoring_runs` |
 | **Jupyter Lab** | EDA (`01_eda.ipynb`) and training (`02_train.ipynb`) — outside Docker |
 
@@ -109,7 +126,7 @@ radar-echo-classifier/
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── n8n/
-│   ├── workflow_score_latest.json  # n8n workflow — import via UI
+│   ├── workflow_score_latest.json  # n8n workflow — auto-imported on stack startup
 │   └── README.md
 ├── grafana/
 │   ├── dashboards/
@@ -195,11 +212,13 @@ docker compose exec postgres psql -U radar -d radar_db < sql/init_schema.sql
 | http://localhost:5678 | n8n (admin / admin) |
 | http://localhost:8000/docs | FastAPI Swagger UI |
 
-### 5. Import the n8n workflow
+> **n8n workflow** — `n8n/workflow_score_latest.json` is automatically imported when the container
+> starts (the entrypoint runs `n8n import:workflow` before launching the server). The workflow has
+> a stable `"id"` so re-deploying is idempotent: n8n updates the existing workflow instead of
+> creating a duplicate. If the import fails for any reason, n8n still starts and you can fall back
+> to the manual import: **Workflows → Import from file**.
 
-In n8n → Workflows → Import from file → select `n8n/workflow_score_latest.json`.
-
-### 6. Run a live scoring
+### 5. Run a live scoring
 
 ```bash
 curl -X POST http://localhost:8000/score_nexrad \
@@ -207,7 +226,7 @@ curl -X POST http://localhost:8000/score_nexrad \
   -d '{"site": "KBRO", "scan_index": -1}'
 ```
 
-### 7. Inject a test run into Grafana
+### 6. Inject a test run into Grafana
 
 ```bash
 curl -X POST http://localhost:8000/log_run \
@@ -215,7 +234,7 @@ curl -X POST http://localhost:8000/log_run \
   -d '{"site": "KBRO", "n_scored": 2910, "n_clutter": 350, "clutter_rate": 0.12}'
 ```
 
-### 8. Connect to PostgreSQL directly
+### 7. Connect to PostgreSQL directly
 
 ```bash
 docker compose exec postgres psql -U radar -d radar_db
